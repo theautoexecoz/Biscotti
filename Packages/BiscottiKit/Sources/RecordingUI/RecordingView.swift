@@ -151,6 +151,10 @@ public struct RecordingView: View {
 
             statusRow
 
+            micLevelRow
+
+            micBanners
+
             titleSection
 
             timeChipsRow
@@ -277,6 +281,42 @@ public struct RecordingView: View {
             eventSubmeta
         } else {
             adHocSubmeta
+        }
+    }
+}
+
+// MARK: - Mic level row and warnings
+
+private extension RecordingView {
+    /// Live mic meter plus the device being recorded, so a dead or wrong
+    /// mic is visible at a glance.
+    var micLevelRow: some View {
+        HStack(spacing: Tokens.spacingSM) {
+            Image(systemName: "mic.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(Color.inkSecondary)
+            LevelMeter(fraction: viewModel.micMeterFraction, isActive: viewModel.hasMicLevel)
+                .frame(maxWidth: 180)
+            if let name = viewModel.micDeviceName {
+                Text(name)
+                    .font(.monoMeta)
+                    .foregroundStyle(Color.inkSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    var micBanners: some View {
+        if let micWarning = viewModel.micInputWarningText {
+            Banner(micWarning, style: .warning)
+                .frame(maxWidth: 400)
+        }
+        if viewModel.showMicSilenceWarning {
+            Banner(RecordingViewModel.micSilenceWarningText, style: .error)
+                .frame(maxWidth: 400)
         }
     }
 }

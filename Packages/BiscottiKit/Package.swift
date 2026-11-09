@@ -497,8 +497,10 @@ let package = Package(
                 "MCPServer",
                 "ModelManagementUI",
                 "Permissions",
+                "Recording",
                 "SummaryPromptUI",
-                "Vocabulary"
+                "Vocabulary",
+                .product(name: "AudioCapture", package: "AudioCapture")
             ],
             swiftSettings: warningsAsErrors
         ),

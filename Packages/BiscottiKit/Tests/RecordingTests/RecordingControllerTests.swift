@@ -689,3 +689,69 @@ struct RecordingStateRecoveryTests {
         #expect(FileManager.default.fileExists(atPath: markerURL.path))
     }
 }
+
+// MARK: - Mic level and silence tests
+
+@Suite("RecordingController -- mic level and silence")
+struct RecordingMicLevelTests {
+    private static func captureState(
+        elapsed: TimeInterval,
+        peak: Float,
+        input: MicInputStatus? = nil
+    ) -> CaptureState {
+        CaptureState(
+            isRecording: true,
+            elapsed: elapsed,
+            micLevel: peak,
+            systemLevel: 0,
+            startTimestamp: 1,
+            micLevelSample: AudioLevelSample(rms: peak, peak: peak, secondsSinceLastBuffer: 0.05),
+            micInput: input
+        )
+    }
+
+    @Test("publishes the latest mic level and device")
+    @MainActor
+    func publishesLevelAndDevice() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+        let input = MicInputStatus(deviceName: "Shure MV7", requestedName: "Shure MV7", binding: .selected)
+
+        fix.controller.ingestMicState(Self.captureState(elapsed: 1, peak: 0.3, input: input))
+
+        #expect(fix.controller.micLevel?.peak == 0.3)
+        #expect(fix.controller.micInput == input)
+        #expect(fix.controller.micSilenceWarning == false)
+    }
+
+    @Test("warns after sustained digital silence and clears when audio returns")
+    @MainActor
+    func warnsAndClears() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+        let window = MicSilenceDetector.defaultWindow
+
+        fix.controller.ingestMicState(Self.captureState(elapsed: 0, peak: 0))
+        #expect(fix.controller.micSilenceWarning == false)
+        fix.controller.ingestMicState(Self.captureState(elapsed: window, peak: 0))
+        #expect(fix.controller.micSilenceWarning == true)
+        fix.controller.ingestMicState(Self.captureState(elapsed: window + 1, peak: 0.2))
+        #expect(fix.controller.micSilenceWarning == false)
+    }
+
+    @Test("reset clears mic state")
+    @MainActor
+    func resetClears() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+        fix.controller.ingestMicState(Self.captureState(elapsed: 0, peak: 0))
+        fix.controller.ingestMicState(Self.captureState(elapsed: 60, peak: 0))
+        #expect(fix.controller.micSilenceWarning == true)
+
+        fix.controller.resetMicMonitoring()
+
+        #expect(fix.controller.micLevel == nil)
+        #expect(fix.controller.micInput == nil)
+        #expect(fix.controller.micSilenceWarning == false)
+    }
+}

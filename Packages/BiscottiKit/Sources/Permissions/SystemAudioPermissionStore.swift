@@ -13,7 +13,7 @@ public protocol SystemAudioPermissionStore: Sendable {
 
 /// Production store backed by `UserDefaults`.
 ///
-/// This is the project's single `UserDefaults` usage. The key is
+/// One of two `UserDefaults` stores (with `UserDefaultsMicInputStore`). The key is
 /// `"systemAudioPermissionState"`; the value is the raw string of the enum.
 public struct UserDefaultsSystemAudioPermissionStore: SystemAudioPermissionStore, @unchecked Sendable {
     private let defaults: UserDefaults

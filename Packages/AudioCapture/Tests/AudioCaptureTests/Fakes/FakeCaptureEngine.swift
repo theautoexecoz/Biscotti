@@ -27,6 +27,10 @@ final class FakeCaptureEngine: CaptureEngine, @unchecked Sendable {
         var startsWithoutBuffers = 0
         /// Simulated write error surfaced via `writeError`.
         var simulatedWriteError: OSStatus?
+        /// Simulated level returned by `readLevel()`.
+        var simulatedLevel: AudioLevelSample?
+        /// Simulated input status returned by `inputStatus`.
+        var simulatedInputStatus: MicInputStatus?
     }
 
     private let state = Mutex(State())
@@ -123,6 +127,22 @@ final class FakeCaptureEngine: CaptureEngine, @unchecked Sendable {
 
     var writeError: OSStatus? {
         state.withLock { $0.simulatedWriteError }
+    }
+
+    func setLevel(_ level: AudioLevelSample?) {
+        state.withLock { $0.simulatedLevel = level }
+    }
+
+    func readLevel() -> AudioLevelSample? {
+        state.withLock { $0.simulatedLevel }
+    }
+
+    func setInputStatus(_ status: MicInputStatus?) {
+        state.withLock { $0.simulatedInputStatus = status }
+    }
+
+    var inputStatus: MicInputStatus? {
+        state.withLock { $0.simulatedInputStatus }
     }
 
     func setMicAnchor(_ seconds: Double) {

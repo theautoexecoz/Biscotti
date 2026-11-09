@@ -24,6 +24,16 @@ public final class RecordingController {
     /// The last error from a start or stop attempt. Cleared on next start.
     public private(set) var lastError: RecordingError?
 
+    /// Latest mic reading while recording (~250 ms cadence); `nil` when idle.
+    public private(set) var micLevel: AudioLevelSample?
+
+    /// The device the mic is capturing from; `nil` when idle.
+    public private(set) var micInput: MicInputStatus?
+
+    /// `true` while the mic has been silent long enough to warn
+    /// (see `MicSilenceDetector`). Advisory; never stops the recording.
+    public private(set) var micSilenceWarning: Bool = false
+
     /// In-memory notes captured during the current recording session.
     /// Oldest-first (insertion order). Reset on `start()`, seeded on `stop()`.
     public private(set) var notes: [MeetingNote] = []
@@ -44,6 +54,7 @@ public final class RecordingController {
     private var stateStreamTask: Task<Void, Never>?
     private var denialCheckTask: Task<Void, Never>?
     private var cleanupTask: Task<Void, Never>?
+    private var silenceDetector = MicSilenceDetector()
 
     private static let logger = Logger(
         subsystem: "net.scosman.biscotti",
@@ -118,6 +129,7 @@ public final class RecordingController {
         lastError = nil
         systemAudioWarning = false
         notes = []
+        resetMicMonitoring()
 
         guard !state.isRecording else {
             lastError = .alreadyRecording
@@ -174,6 +186,7 @@ public final class RecordingController {
         // Cancel background tasks
         stateStreamTask?.cancel()
         stateStreamTask = nil
+        resetMicMonitoring()
         denialCheckTask?.cancel()
         denialCheckTask = nil
 
@@ -381,6 +394,7 @@ public final class RecordingController {
                 guard !Task.isCancelled else { break }
                 guard let self else { break }
                 state.elapsed = captureState.elapsed
+                ingestMicState(captureState)
             }
         }
     }
@@ -402,5 +416,36 @@ public final class RecordingController {
                 systemAudioWarning = true
             }
         }
+    }
+}
+
+// MARK: - Mic level and silence monitoring
+
+extension RecordingController {
+    /// Publishes the mic level/device and runs the silence detector.
+    /// Engines that do not meter (`micLevelSample == nil`) never warn.
+    package func ingestMicState(_ captureState: CaptureState) {
+        guard captureState.isRecording else { return }
+        micInput = captureState.micInput
+        guard let level = captureState.micLevelSample else { return }
+        micLevel = level
+        let silent = silenceDetector.ingest(level, at: captureState.elapsed)
+        if silent != micSilenceWarning {
+            micSilenceWarning = silent
+            if silent {
+                let window = Int(silenceDetector.window)
+                let peakDB = level.peakDB
+                Self.logger.error("Mic silent for \(window, privacy: .public)s during recording (peak \(peakDB, privacy: .public) dBFS)")
+            } else {
+                Self.logger.notice("Mic audio resumed after silence warning")
+            }
+        }
+    }
+
+    package func resetMicMonitoring() {
+        micLevel = nil
+        micInput = nil
+        micSilenceWarning = false
+        silenceDetector.reset()
     }
 }

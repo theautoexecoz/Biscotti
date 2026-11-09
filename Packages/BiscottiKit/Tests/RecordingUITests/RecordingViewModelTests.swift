@@ -1235,3 +1235,46 @@ struct RecordingStartupStateTests {
 }
 
 // RecordingStartupState.isFailed is imported from BiscottiTestSupport.
+
+// MARK: - Mic level and input
+
+@Suite("RecordingViewModel -- mic")
+@MainActor
+struct RecordingViewModelMicTests {
+    @Test("no input warning when following the default or using the chosen mic")
+    func noWarning() {
+        #expect(RecordingViewModel.micInputWarningText(for: nil) == nil)
+        let ok = MicInputStatus(deviceName: "Shure MV7", requestedName: "Shure MV7", binding: .selected)
+        #expect(RecordingViewModel.micInputWarningText(for: ok) == nil)
+        let def = MicInputStatus(deviceName: "MacBook Pro Microphone", requestedName: nil, binding: .systemDefault)
+        #expect(RecordingViewModel.micInputWarningText(for: def) == nil)
+    }
+
+    @Test("fallback warning names both devices")
+    func fallbackWarning() {
+        let status = MicInputStatus(
+            deviceName: "MacBook Pro Microphone", requestedName: "Shure MV7", binding: .selectedUnavailable
+        )
+        #expect(
+            RecordingViewModel.micInputWarningText(for: status)
+                == "Shure MV7 isn't available. Recording from MacBook Pro Microphone instead."
+        )
+    }
+
+    @Test("unconfirmed binding warns")
+    func unconfirmedWarning() {
+        let status = MicInputStatus(deviceName: "Shure MV7", requestedName: "Shure MV7", binding: .selectedUnconfirmed)
+        #expect(RecordingViewModel.micInputWarningText(for: status)?.contains("Shure MV7") == true)
+    }
+
+    @Test("meter is empty and inactive before any level arrives")
+    @MainActor
+    func meterIdle() throws {
+        let fix = try makeCoreFixture(testName: "RecordingUITests")
+        defer { fix.cleanup() }
+        let viewModel = RecordingViewModel(core: fix.core)
+        #expect(viewModel.micMeterFraction == 0)
+        #expect(viewModel.hasMicLevel == false)
+        #expect(viewModel.showMicSilenceWarning == false)
+    }
+}

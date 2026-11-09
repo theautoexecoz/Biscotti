@@ -15,6 +15,21 @@ private let logger = Logger(subsystem: "net.scosman.biscotti.audiocapture", cate
 final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftlint:disable:this type_body_length
     private let encoder: EncoderSettings
 
+    /// The microphone chosen in Settings (UID plus last-known name), or
+    /// `nil` to follow the macOS default input (the original behaviour).
+    private let preferredInput: AudioInputDevice?
+
+    /// Shared across attempts and rebuilds so the meter never goes blank on
+    /// a reconnect. Fed from the session tap; read by `AudioRecorder`.
+    private let levelMeter = AudioLevelMeter()
+
+    /// What the current engine build is capturing from. Written on
+    /// `engineQueue`, read from any thread.
+    private let _inputStatus = Mutex<MicInputStatus?>(nil)
+
+    /// Device the current build bound to. Owned by `engineQueue`.
+    private var currentInputID: AudioObjectID = 0
+
     /// Owned by engineQueue; each start gets a separate file and callback lifetime.
     private var session: MicCaptureSession?
 
@@ -56,9 +71,19 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
         firstBufferCallback.withLock { $0 = callback }
     }
 
-    /// Configures the file encoding used by each independent recording attempt.
-    init(encoder: EncoderSettings = .voice) {
+    /// Configures the file encoding used by each independent recording attempt
+    /// and, optionally, the microphone to record from.
+    init(encoder: EncoderSettings = .voice, preferredInput: AudioInputDevice? = nil) {
         self.encoder = encoder
+        self.preferredInput = preferredInput
+    }
+
+    func readLevel() -> AudioLevelSample? {
+        levelMeter.read()
+    }
+
+    var inputStatus: MicInputStatus? {
+        _inputStatus.withLock { $0 }
     }
 
     // MARK: - CaptureEngine conformance
@@ -84,7 +109,10 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
                 engineQueue.async { [self] in
                     isTearingDown = false
                     do {
-                        session = try MicCaptureSession(url: url, encoder: encoder, onFirstBuffer: callback)
+                        levelMeter.reset()
+                        session = try MicCaptureSession(
+                            url: url, encoder: encoder, onFirstBuffer: callback, levelMeter: levelMeter
+                        )
                         try buildAndStartEngineOrThrow()
                         installConfigChangeObserver()
                         cont.resume()
@@ -131,9 +159,11 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
                     cont.resume()
                     return
                 }
-                if let inID = CoreAudioHelpers.defaultInputDeviceID() {
+                if preferredInput == nil, let inID = CoreAudioHelpers.defaultInputDeviceID() {
                     let name = CoreAudioHelpers.deviceName(for: inID) ?? "unknown"
                     logger.info("Mic reconnect: following default input \"\(name)\" id=\(inID)")
+                } else if preferredInput != nil {
+                    logger.notice("Mic reconnect: re-resolving selected input device")
                 }
                 teardownEngine()
                 do {
@@ -169,11 +199,21 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
     private func buildAndStartEngineOrThrow() throws {
         guard capturingFlag.load(ordering: .acquiring) else { return }
 
-        ensureOutputRateMatchesInput()
+        let target = resolveInputDevice()
+        ensureOutputRateMatchesInput(inputID: target.deviceID)
 
         let newEngine = AVAudioEngine()
         engine = newEngine // store early so teardownEngine() works on failure
         let input = newEngine.inputNode
+
+        // Bind the chosen device before enabling voice processing: VPIO builds
+        // its duplex aggregate from the input node's current device.
+        var bound = target
+        if target.isPinned, !bindInputDevice(target.deviceID, to: input) {
+            bound = fallbackToDefault(requestedName: target.status.requestedName)
+        }
+        currentInputID = bound.deviceID
+        _inputStatus.withLock { $0 = bound.status }
 
         try input.setVoiceProcessingEnabled(true)
         input.voiceProcessingOtherAudioDuckingConfiguration = .init(
@@ -181,6 +221,7 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
         )
 
         try installCaptureGraphAndStart(newEngine)
+        verifyBinding(bound)
     }
 
     /// Re-query the hardware format for both initial setup and startup recovery.
@@ -192,7 +233,7 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
         guard tapFormat.sampleRate > 0, tapFormat.channelCount > 0 else {
             throw CaptureError.micEngineFailed("The microphone has no usable audio format.")
         }
-        let inputID = CoreAudioHelpers.defaultInputDeviceID() ?? 0
+        let inputID = currentInputID
         let outputID = CoreAudioHelpers.defaultOutputDeviceID() ?? 0
         let inputRate = CoreAudioHelpers.nominalSampleRate(for: inputID) ?? 0
         let outputRate = CoreAudioHelpers.nominalSampleRate(for: outputID) ?? 0
@@ -248,8 +289,9 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
     }
 
     /// Reconciles duplex device rates before creating the voice-processing graph.
-    private func ensureOutputRateMatchesInput() {
-        guard let inID = CoreAudioHelpers.defaultInputDeviceID(),
+    private func ensureOutputRateMatchesInput(inputID: AudioObjectID) {
+        let inID = inputID
+        guard inID != kAudioObjectUnknown,
               let inRate = CoreAudioHelpers.nominalSampleRate(for: inID),
               let outID = CoreAudioHelpers.defaultOutputDeviceID(),
               let outRate = CoreAudioHelpers.nominalSampleRate(for: outID)
@@ -406,6 +448,117 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
             _micWriteError.withLock { $0 = $0 ?? sessionError }
         }
         session = nil
+    }
+}
+
+// MARK: - Input device selection (engineQueue)
+
+/// The device one engine build will capture from.
+private struct InputTarget {
+    let deviceID: AudioObjectID
+    /// `true` when a Settings choice is bound (vs. following the default).
+    let isPinned: Bool
+    let status: MicInputStatus
+}
+
+private extension LiveMicCaptureEngine {
+    static func displayName(of deviceID: AudioObjectID) -> String {
+        CoreAudioHelpers.deviceName(for: deviceID) ?? "Unknown microphone"
+    }
+
+    /// Resolves the Settings choice against connected devices. Re-run on every
+    /// build, so unplugging the chosen mic mid-recording falls back to the
+    /// default on the configuration-change rebuild.
+    func resolveInputDevice() -> InputTarget {
+        let selection = InputDeviceResolver.resolve(
+            preferredUID: preferredInput?.uid,
+            candidates: AudioInputDevices.candidates()
+        )
+        switch selection {
+        case .systemDefault:
+            let id = CoreAudioHelpers.defaultInputDeviceID() ?? 0
+            return InputTarget(
+                deviceID: id,
+                isPinned: false,
+                status: MicInputStatus(
+                    deviceName: Self.displayName(of: id), requestedName: nil, binding: .systemDefault
+                )
+            )
+        case let .preferred(id):
+            let name = Self.displayName(of: id)
+            logger.notice("Mic input: selected device id=\(id, privacy: .public)")
+            return InputTarget(
+                deviceID: id,
+                isPinned: true,
+                status: MicInputStatus(deviceName: name, requestedName: name, binding: .selected)
+            )
+        case .preferredUnavailable:
+            logger.error("Mic input: selected device is not connected; falling back to the system default input")
+            return fallbackToDefault(requestedName: preferredInput?.name)
+        }
+    }
+
+    /// Target for the system default, flagged as a fallback from the choice.
+    func fallbackToDefault(requestedName: String?) -> InputTarget {
+        let id = CoreAudioHelpers.defaultInputDeviceID() ?? 0
+        return InputTarget(
+            deviceID: id,
+            isPinned: false,
+            status: MicInputStatus(
+                deviceName: Self.displayName(of: id),
+                requestedName: requestedName ?? preferredInput?.name,
+                binding: .selectedUnavailable
+            )
+        )
+    }
+
+    /// Points the input node's IO unit at `deviceID`. Must run before
+    /// voice processing is enabled. Returns `false` if Core Audio refuses.
+    func bindInputDevice(_ deviceID: AudioObjectID, to input: AVAudioInputNode) -> Bool {
+        guard let unit = input.audioUnit else {
+            logger.error("Mic input bind: input node has no audio unit")
+            return false
+        }
+        var device = deviceID
+        let status = AudioUnitSetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &device,
+            UInt32(MemoryLayout<AudioObjectID>.size)
+        )
+        logger.notice("Mic input bind: device id=\(deviceID, privacy: .public) status=\(status, privacy: .public)")
+        return status == noErr
+    }
+
+    /// After start, confirms the chosen device is actually running. This log
+    /// line is the hardware evidence that the binding worked under VPIO.
+    func verifyBinding(_ target: InputTarget) {
+        guard target.isPinned else { return }
+        let running = CoreAudioHelpers.isRunningSomewhere(target.deviceID)
+        let unitDevice = engine?.inputNode.audioUnit.flatMap(Self.currentDevice(of:)) ?? 0
+        let runningText = running.map { $0 ? "true" : "false" } ?? "unknown"
+        logger.notice("Mic input verify: requested id=\(target.deviceID, privacy: .public) unitDevice=\(unitDevice, privacy: .public) runningSomewhere=\(runningText, privacy: .public)")
+        if running == false {
+            logger.error("Mic input verify: selected device is not running after start; audio may be coming from another device")
+            _inputStatus.withLock {
+                $0 = MicInputStatus(
+                    deviceName: target.status.deviceName,
+                    requestedName: target.status.requestedName,
+                    binding: .selectedUnconfirmed
+                )
+            }
+        }
+    }
+
+    static func currentDevice(of unit: AudioUnit) -> AudioObjectID? {
+        var device: AudioObjectID = 0
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = AudioUnitGetProperty(
+            unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, &size
+        )
+        return status == noErr ? device : nil
     }
 }
 

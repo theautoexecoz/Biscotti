@@ -46,6 +46,15 @@ public protocol CaptureEngine: Sendable {
     /// `stop()` to surface write errors. Nil for engines without a write
     /// path (mic engine, fakes).
     var writeError: OSStatus? { get }
+
+    /// Live input level for this stream, or `nil` if the engine does not
+    /// meter. Reading resets the held peak, so one consumer (the recorder's
+    /// state pump) should poll it.
+    func readLevel() -> AudioLevelSample?
+
+    /// The device this engine is capturing from, or `nil` if not applicable
+    /// (system engine, fakes) or not yet started.
+    var inputStatus: MicInputStatus? { get }
 }
 
 public extension CaptureEngine {
@@ -54,6 +63,14 @@ public extension CaptureEngine {
     func setMicAnchor(_: Double) {}
 
     var writeError: OSStatus? {
+        nil
+    }
+
+    func readLevel() -> AudioLevelSample? {
+        nil
+    }
+
+    var inputStatus: MicInputStatus? {
         nil
     }
 }

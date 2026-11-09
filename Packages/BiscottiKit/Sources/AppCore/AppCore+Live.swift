@@ -44,12 +44,17 @@ public extension AppCore {
         let recordingsRoot = storageRoot.appendingPathComponent("Recordings")
 
         logger.info("AppCore.live: RecordingController init")
+        // Read the Settings mic choice per recording, so a change applies to
+        // the next recording without relaunching.
+        let micInputStore = UserDefaultsMicInputStore()
         let recording = RecordingController(
             store: store,
             permissions: permissions,
             storageRoot: recordingsRoot,
             makeRecorder: {
-                LiveRecorderAdapter(recorder: AudioRecorder.live())
+                LiveRecorderAdapter(
+                    recorder: AudioRecorder.live(preferredInput: micInputStore.load())
+                )
             }
         )
 

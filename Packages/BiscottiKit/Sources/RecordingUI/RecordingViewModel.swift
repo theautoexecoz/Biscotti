@@ -432,3 +432,51 @@ public final class RecordingViewModel {
         formatChipTime(seconds)
     }
 }
+
+// MARK: - Mic level and input
+
+public extension RecordingViewModel {
+    /// Mic meter fill 0...1 from the held peak since the last update.
+    var micMeterFraction: Double {
+        guard let level = core.recording.micLevel else { return 0 }
+        return AudioLevel.meterFraction(fromLinear: level.peak)
+    }
+
+    /// `false` until the first level reading arrives.
+    var hasMicLevel: Bool {
+        core.recording.micLevel != nil
+    }
+
+    /// Name of the device being recorded, e.g. "MacBook Pro Microphone".
+    var micDeviceName: String? {
+        core.recording.micInput?.deviceName
+    }
+
+    /// Whether the "no mic audio" banner should show.
+    var showMicSilenceWarning: Bool {
+        core.recording.micSilenceWarning
+    }
+
+    /// Banner text when the mic is silent.
+    static let micSilenceWarningText =
+        "No microphone audio for \(Int(MicSilenceDetector.defaultWindow)) seconds. Check your mic is connected and not muted."
+
+    /// Banner text when the chosen mic is not the one recording, or `nil`.
+    var micInputWarningText: String? {
+        Self.micInputWarningText(for: core.recording.micInput)
+    }
+
+    /// Pure mapping for `micInputWarningText`, exposed for tests.
+    static func micInputWarningText(for status: MicInputStatus?) -> String? {
+        guard let status, status.needsAttention else { return nil }
+        let requested = status.requestedName ?? "The selected microphone"
+        switch status.binding {
+        case .selectedUnavailable:
+            return "\(requested) isn't available. Recording from \(status.deviceName) instead."
+        case .selectedUnconfirmed:
+            return "Couldn't confirm \(requested) is recording. Watch the level meter."
+        case .systemDefault, .selected:
+            return nil
+        }
+    }
+}

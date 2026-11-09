@@ -406,12 +406,17 @@ public actor AudioRecorder {
         } else {
             0
         }
+        // Reading the meter resets its held peak; the state timer is the
+        // only regular caller, so each emitted state covers one interval.
+        let level = isRecording ? micEngine.readLevel() : nil
         return CaptureState(
             isRecording: isRecording,
             elapsed: elapsed,
-            micLevel: 0, // RMS unwired per phase 9
-            systemLevel: 0, // RMS unwired per phase 9
-            startTimestamp: _startTimestamp
+            micLevel: level?.rms ?? 0,
+            systemLevel: 0, // System RMS unwired per phase 9
+            startTimestamp: _startTimestamp,
+            micLevelSample: level,
+            micInput: isRecording ? micEngine.inputStatus : nil
         )
     }
 
@@ -668,11 +673,19 @@ public extension AudioRecorder {
     /// Creates a recorder wired to real Core Audio / AVAudioEngine backends.
     ///
     /// Use this for production; use the main `init` with fakes for tests.
-    static func live(encoder: EncoderSettings = .voice) -> AudioRecorder {
+    ///
+    /// - Parameter preferredInput: The microphone chosen in Settings, or `nil`
+    ///   to follow the macOS default input. If the device is not connected
+    ///   the recorder falls back to the default and reports it via
+    ///   `CaptureState.micInput`.
+    static func live(
+        encoder: EncoderSettings = .voice,
+        preferredInput: AudioInputDevice? = nil
+    ) -> AudioRecorder {
         let permissionChecker = LiveSystemPermissionChecker()
         return AudioRecorder(
             systemEngine: LiveSystemCaptureEngine(permissionChecker: permissionChecker, encoder: encoder),
-            micEngine: LiveMicCaptureEngine(encoder: encoder),
+            micEngine: LiveMicCaptureEngine(encoder: encoder, preferredInput: preferredInput),
             deviceChangeProvider: LiveDeviceChangeProvider(),
             permissionChecker: permissionChecker,
             micPermissionChecker: LiveMicPermissionChecker(),
