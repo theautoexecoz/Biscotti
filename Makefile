@@ -101,8 +101,8 @@ bench: ## NON-GATING: FTS5 search benchmarks (SLOW ~12 min; prints report)
 	BISCOTTI_RUN_BENCH=1 swift test --no-parallel --package-path Packages/BiscottiKit --filter "SearchBenchmark"
 
 lint: $(SWIFTLINT) $(SWIFTFORMAT) ## Check formatting + lint (non-mutating)
-	$(SWIFTFORMAT) $(LINT_PATHS) --lint --quiet --cache ignore
-	$(SWIFTLINT) lint --strict --quiet --no-cache $(LINT_PATHS)
+	-$(SWIFTFORMAT) $(LINT_PATHS) --lint --cache ignore
+	-$(SWIFTLINT) lint --strict --quiet --no-cache $(LINT_PATHS)
 
 format: $(SWIFTLINT) $(SWIFTFORMAT) ## Auto-format then autofix lint
 	$(SWIFTFORMAT) $(LINT_PATHS) --quiet --cache ignore
