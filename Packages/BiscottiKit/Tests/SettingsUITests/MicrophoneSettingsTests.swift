@@ -14,7 +14,7 @@ struct MicrophoneChoiceTests {
         let rows = MicrophoneSettingsViewModel.makeChoices(
             devices: [builtIn, usb], systemDefault: builtIn, saved: nil
         )
-        let labels = rows.map { $0.label }
+        let labels = rows.map(\.label)
         #expect(labels == ["System default (MacBook Pro Microphone)", "MacBook Pro Microphone", "Shure MV7"])
         #expect(rows[0].device == nil)
         #expect(rows[0].id == MicrophoneChoice.systemDefaultID)
@@ -23,7 +23,7 @@ struct MicrophoneChoiceTests {
     @Test("system default without a device has a plain label")
     func noSystemDefault() {
         let rows = MicrophoneSettingsViewModel.makeChoices(devices: [], systemDefault: nil, saved: nil)
-        let labels = rows.map { $0.label }
+        let labels = rows.map(\.label)
         #expect(labels == ["System default"])
     }
 
