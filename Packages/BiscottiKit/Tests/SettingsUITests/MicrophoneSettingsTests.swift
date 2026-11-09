@@ -14,7 +14,8 @@ struct MicrophoneChoiceTests {
         let rows = MicrophoneSettingsViewModel.makeChoices(
             devices: [builtIn, usb], systemDefault: builtIn, saved: nil
         )
-        #expect(rows.map(\.label) == ["System default (MacBook Pro Microphone)", "MacBook Pro Microphone", "Shure MV7"])
+        let labels = rows.map { $0.label }
+        #expect(labels == ["System default (MacBook Pro Microphone)", "MacBook Pro Microphone", "Shure MV7"])
         #expect(rows[0].device == nil)
         #expect(rows[0].id == MicrophoneChoice.systemDefaultID)
     }
@@ -22,7 +23,8 @@ struct MicrophoneChoiceTests {
     @Test("system default without a device has a plain label")
     func noSystemDefault() {
         let rows = MicrophoneSettingsViewModel.makeChoices(devices: [], systemDefault: nil, saved: nil)
-        #expect(rows.map(\.label) == ["System default"])
+        let labels = rows.map { $0.label }
+        #expect(labels == ["System default"])
     }
 
     @Test("a saved device that is connected is not duplicated")
@@ -31,7 +33,8 @@ struct MicrophoneChoiceTests {
             devices: [builtIn, usb], systemDefault: builtIn, saved: usb
         )
         #expect(rows.count == 3)
-        #expect(!rows.contains(where: \.isDisconnected))
+        let anyDisconnected = rows.contains { $0.isDisconnected }
+        #expect(anyDisconnected == false)
     }
 
     @Test("a saved device that is disconnected stays visible and flagged")

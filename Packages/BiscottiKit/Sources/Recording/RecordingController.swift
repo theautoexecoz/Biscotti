@@ -421,10 +421,10 @@ public final class RecordingController {
 
 // MARK: - Mic level and silence monitoring
 
-extension RecordingController {
+package extension RecordingController {
     /// Publishes the mic level/device and runs the silence detector.
     /// Engines that do not meter (`micLevelSample == nil`) never warn.
-    package func ingestMicState(_ captureState: CaptureState) {
+    func ingestMicState(_ captureState: CaptureState) {
         guard captureState.isRecording else { return }
         micInput = captureState.micInput
         guard let level = captureState.micLevelSample else { return }
@@ -442,7 +442,7 @@ extension RecordingController {
         }
     }
 
-    package func resetMicMonitoring() {
+    func resetMicMonitoring() {
         micLevel = nil
         micInput = nil
         micSilenceWarning = false

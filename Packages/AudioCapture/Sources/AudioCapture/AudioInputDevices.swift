@@ -72,13 +72,13 @@ public enum AudioInputDevices {
 }
 
 /// A live input device: its persistent UID and its current object ID.
-struct InputDeviceCandidate: Sendable, Equatable {
+struct InputDeviceCandidate: Equatable {
     let uid: String
     let id: AudioObjectID
 }
 
 /// Which device the mic engine should bind to for this build.
-enum InputDeviceSelection: Sendable, Equatable {
+enum InputDeviceSelection: Equatable {
     /// No preference saved: follow the macOS default input (original behaviour).
     case systemDefault
     /// The preferred device is connected; bind to this object ID.

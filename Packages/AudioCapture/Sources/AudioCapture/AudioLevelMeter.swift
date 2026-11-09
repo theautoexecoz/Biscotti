@@ -95,9 +95,9 @@ public enum AudioLevel {
     }
 
     /// dBFS → meter fill 0...1 across `meterMinDB...0`.
-    public static func meterFraction(fromDB db: Float) -> Double {
-        guard db > meterMinDB else { return 0 }
-        return Double(min(1, (db - meterMinDB) / -meterMinDB))
+    public static func meterFraction(fromDB decibels: Float) -> Double {
+        guard decibels > meterMinDB else { return 0 }
+        return Double(min(1, (decibels - meterMinDB) / -meterMinDB))
     }
 
     /// Linear peak → meter fill 0...1.

@@ -1244,8 +1244,8 @@ struct RecordingViewModelMicTests {
     @Test("no input warning when following the default or using the chosen mic")
     func noWarning() {
         #expect(RecordingViewModel.micInputWarningText(for: nil) == nil)
-        let ok = MicInputStatus(deviceName: "Shure MV7", requestedName: "Shure MV7", binding: .selected)
-        #expect(RecordingViewModel.micInputWarningText(for: ok) == nil)
+        let selected = MicInputStatus(deviceName: "Shure MV7", requestedName: "Shure MV7", binding: .selected)
+        #expect(RecordingViewModel.micInputWarningText(for: selected) == nil)
         let def = MicInputStatus(deviceName: "MacBook Pro Microphone", requestedName: nil, binding: .systemDefault)
         #expect(RecordingViewModel.micInputWarningText(for: def) == nil)
     }

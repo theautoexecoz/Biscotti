@@ -400,26 +400,6 @@ public actor AudioRecorder {
 
     // MARK: - Internal helpers
 
-    private var currentState: CaptureState {
-        let elapsed: TimeInterval = if isRecording, _startTimestamp > 0 {
-            CACurrentMediaTime() - _startTimestamp
-        } else {
-            0
-        }
-        // Reading the meter resets its held peak; the state timer is the
-        // only regular caller, so each emitted state covers one interval.
-        let level = isRecording ? micEngine.readLevel() : nil
-        return CaptureState(
-            isRecording: isRecording,
-            elapsed: elapsed,
-            micLevel: level?.rms ?? 0,
-            systemLevel: 0, // System RMS unwired per phase 9
-            startTimestamp: _startTimestamp,
-            micLevelSample: level,
-            micInput: isRecording ? micEngine.inputStatus : nil
-        )
-    }
-
     private func emitState() {
         let state = currentState
         for (_, continuation) in stateContinuations {
@@ -690,6 +670,30 @@ public extension AudioRecorder {
             permissionChecker: permissionChecker,
             micPermissionChecker: LiveMicPermissionChecker(),
             encoder: encoder
+        )
+    }
+}
+
+// MARK: - State snapshot
+
+private extension AudioRecorder {
+    var currentState: CaptureState {
+        let elapsed: TimeInterval = if isRecording, _startTimestamp > 0 {
+            CACurrentMediaTime() - _startTimestamp
+        } else {
+            0
+        }
+        // Reading the meter resets its held peak; the state timer is the
+        // only regular caller, so each emitted state covers one interval.
+        let level = isRecording ? micEngine.readLevel() : nil
+        return CaptureState(
+            isRecording: isRecording,
+            elapsed: elapsed,
+            micLevel: level?.rms ?? 0,
+            systemLevel: 0, // System RMS unwired per phase 9
+            startTimestamp: _startTimestamp,
+            micLevelSample: level,
+            micInput: isRecording ? micEngine.inputStatus : nil
         )
     }
 }
