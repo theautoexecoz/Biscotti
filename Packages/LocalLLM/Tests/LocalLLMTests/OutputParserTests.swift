@@ -128,3 +128,39 @@ struct OutputParserTests {
         #expect(result == "Hello")
     }
 }
+
+@Suite("OutputParser -- stray close marker")
+struct OutputParserStrayCloseTests {
+    @Test("plain-text reasoning before a stray close marker is dropped")
+    func dropsReasoningBeforeStrayClose() {
+        let raw = "The user wants a concise title.\nLet me think.<channel|>Q4 Budget Review<turn|>"
+        let result = OutputParser.parse(rawText: raw)
+        #expect(result.text == "Q4 Budget Review")
+        #expect(result.reasoning == nil)
+    }
+
+    @Test("duplicated summary around a stray close marker keeps one copy")
+    func keepsAnswerAfterStrayClose() {
+        let summary = "## Summary\nShort call.\n\n## Action Items\n- [ ] None"
+        let result = OutputParser.parse(rawText: summary + "<channel|>" + summary)
+        #expect(result.text == summary)
+    }
+
+    @Test("reasoning is returned when thinking is not stripped")
+    func returnsReasoningWhenRequested() {
+        let result = OutputParser.parse(rawText: "drafting<channel|>final", stripThinking: false)
+        #expect(result.text == "final")
+        #expect(result.reasoning == "drafting")
+    }
+
+    @Test("nothing after the stray marker keeps the text before it")
+    func keepsTextWhenNothingFollows() {
+        let result = OutputParser.parse(rawText: "Only answer<channel|>  ")
+        #expect(result.text == "Only answer")
+    }
+
+    @Test("output without markers is unchanged")
+    func noMarkers() {
+        #expect(OutputParser.parse(rawText: "Plain answer").text == "Plain answer")
+    }
+}
