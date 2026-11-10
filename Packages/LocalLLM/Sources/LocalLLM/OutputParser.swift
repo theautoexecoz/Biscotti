@@ -48,6 +48,18 @@ public enum OutputParser: Sendable {
             if let thought = thinkingResult.reasoning {
                 reasoning = stripThinking ? nil : thought
             }
+        } else {
+            // A close marker with no open marker: with thinking off, the open
+            // tag is prefilled in the prompt (not in the output), and the model
+            // sometimes reasons in plain text and then re-closes the channel.
+            // Everything before that close marker is reasoning.
+            let stray = extractStrayThinking(from: text)
+            if stray.found {
+                text = stray.text
+                if let thought = stray.reasoning {
+                    reasoning = stripThinking ? nil : thought
+                }
+            }
         }
 
         // Strip turn tokens from the end
@@ -102,6 +114,26 @@ public enum OutputParser: Sendable {
         let cleaned = String(text[..<openRange.lowerBound])
         let reasoning = thought.isEmpty ? nil : thought
         return ThinkingResult(text: cleaned, reasoning: reasoning, found: true)
+    }
+
+    /// Handles output containing `thinkingCloseTag` but no `thinkingOpenTag`.
+    ///
+    /// Keeps the text after the last close marker as the answer and returns
+    /// what came before as reasoning. If nothing follows the last marker, the
+    /// text before the first marker is kept instead (markers removed), so an
+    /// answer is never discarded.
+    public static func extractStrayThinking(from text: String) -> ThinkingResult {
+        guard let lastClose = text.range(of: thinkingCloseTag, options: [.literal, .backwards]) else {
+            return ThinkingResult(text: text, reasoning: nil, found: false)
+        }
+        let after = String(text[lastClose.upperBound...])
+        let before = String(text[..<lastClose.lowerBound])
+            .replacingOccurrences(of: thinkingCloseTag, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard after.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return ThinkingResult(text: after, reasoning: before.isEmpty ? nil : before, found: true)
+        }
+        return ThinkingResult(text: before, reasoning: nil, found: true)
     }
 
     /// Remove trailing turn/stop tokens from text.

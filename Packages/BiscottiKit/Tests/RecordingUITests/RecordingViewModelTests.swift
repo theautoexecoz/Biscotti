@@ -1235,3 +1235,20 @@ struct RecordingStartupStateTests {
 }
 
 // RecordingStartupState.isFailed is imported from BiscottiTestSupport.
+
+// MARK: - Mic level and input
+
+@Suite("RecordingViewModel -- mic")
+@MainActor
+struct RecordingViewModelMicTests {
+    @Test("meter is empty and inactive before any level arrives")
+    @MainActor
+    func meterIdle() throws {
+        let fix = try makeCoreFixture(testName: "RecordingUITests")
+        defer { fix.cleanup() }
+        let viewModel = RecordingViewModel(core: fix.core)
+        #expect(viewModel.micMeterFraction == 0)
+        #expect(viewModel.hasMicLevel == false)
+        #expect(viewModel.showMicSilenceWarning == false)
+    }
+}

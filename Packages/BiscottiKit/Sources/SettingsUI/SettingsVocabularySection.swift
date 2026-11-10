@@ -39,7 +39,7 @@ extension SettingsView {
             }
         } header: {
             HStack {
-                Text(Self.sectionTitles[4])
+                Text(Self.sectionTitles[5])
                 Spacer()
                 Text(Self.customVocabularyHeaderCaption)
                     .font(Tokens.metadataFont)

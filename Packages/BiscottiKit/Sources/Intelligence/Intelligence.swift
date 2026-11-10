@@ -81,8 +81,11 @@ public final class Intelligence {
             return
         }
 
-        // Empty transcript: apply canned results without a model.
-        if transcript.segments.isEmpty {
+        // Empty transcript (or only phrases transcription invents from
+        // silence): apply canned results without a model.
+        if transcript.segments.isEmpty
+            || SilenceHallucination.isOnlyHallucination(transcript.segments)
+        {
             do {
                 try await MeetingAnalyzer.applyEmptyTranscriptResults(
                     meetingID: meetingID, detail: detail,

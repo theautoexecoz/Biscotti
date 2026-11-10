@@ -15,6 +15,17 @@ private let logger = Logger(subsystem: "net.scosman.biscotti.audiocapture", cate
 final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftlint:disable:this type_body_length
     private let encoder: EncoderSettings
 
+    /// Shared across attempts and rebuilds so the meter never goes blank on
+    /// a reconnect. Fed from the session tap; read by `AudioRecorder`.
+    private let levelMeter = AudioLevelMeter()
+
+    /// What the current engine build is capturing from. Written on
+    /// `engineQueue`, read from any thread.
+    private let _inputStatus = Mutex<MicInputStatus?>(nil)
+
+    /// Device the current build captures from. Owned by `engineQueue`.
+    private var currentInputID: AudioObjectID = 0
+
     /// Owned by engineQueue; each start gets a separate file and callback lifetime.
     private var session: MicCaptureSession?
 
@@ -61,6 +72,14 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
         self.encoder = encoder
     }
 
+    func readLevel() -> AudioLevelSample? {
+        levelMeter.read()
+    }
+
+    var inputStatus: MicInputStatus? {
+        _inputStatus.withLock { $0 }
+    }
+
     // MARK: - CaptureEngine conformance
 
     /// Opens a fresh recording session and starts VPIO on the lifecycle queue.
@@ -84,7 +103,10 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
                 engineQueue.async { [self] in
                     isTearingDown = false
                     do {
-                        session = try MicCaptureSession(url: url, encoder: encoder, onFirstBuffer: callback)
+                        levelMeter.reset()
+                        session = try MicCaptureSession(
+                            url: url, encoder: encoder, onFirstBuffer: callback, levelMeter: levelMeter
+                        )
                         try buildAndStartEngineOrThrow()
                         installConfigChangeObserver()
                         cont.resume()
@@ -169,11 +191,19 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
     private func buildAndStartEngineOrThrow() throws {
         guard capturingFlag.load(ordering: .acquiring) else { return }
 
-        ensureOutputRateMatchesInput()
+        // VPIO always captures from the macOS default input.
+        let inputID = CoreAudioHelpers.defaultInputDeviceID() ?? 0
+        ensureOutputRateMatchesInput(inputID: inputID)
 
         let newEngine = AVAudioEngine()
         engine = newEngine // store early so teardownEngine() works on failure
         let input = newEngine.inputNode
+
+        currentInputID = inputID
+        let status = MicInputStatus(
+            deviceName: CoreAudioHelpers.deviceName(for: inputID) ?? "Unknown microphone"
+        )
+        _inputStatus.withLock { $0 = status }
 
         try input.setVoiceProcessingEnabled(true)
         input.voiceProcessingOtherAudioDuckingConfiguration = .init(
@@ -192,7 +222,7 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
         guard tapFormat.sampleRate > 0, tapFormat.channelCount > 0 else {
             throw CaptureError.micEngineFailed("The microphone has no usable audio format.")
         }
-        let inputID = CoreAudioHelpers.defaultInputDeviceID() ?? 0
+        let inputID = currentInputID
         let outputID = CoreAudioHelpers.defaultOutputDeviceID() ?? 0
         let inputRate = CoreAudioHelpers.nominalSampleRate(for: inputID) ?? 0
         let outputRate = CoreAudioHelpers.nominalSampleRate(for: outputID) ?? 0
@@ -248,8 +278,9 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
     }
 
     /// Reconciles duplex device rates before creating the voice-processing graph.
-    private func ensureOutputRateMatchesInput() {
-        guard let inID = CoreAudioHelpers.defaultInputDeviceID(),
+    private func ensureOutputRateMatchesInput(inputID: AudioObjectID) {
+        let inID = inputID
+        guard inID != kAudioObjectUnknown,
               let inRate = CoreAudioHelpers.nominalSampleRate(for: inID),
               let outID = CoreAudioHelpers.defaultOutputDeviceID(),
               let outRate = CoreAudioHelpers.nominalSampleRate(for: outID)
