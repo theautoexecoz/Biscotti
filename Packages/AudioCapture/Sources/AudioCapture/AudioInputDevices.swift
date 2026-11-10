@@ -109,11 +109,11 @@ public struct MicInputStatus: Sendable, Equatable {
         case systemDefault
         /// Recording from the device chosen in Settings.
         case selected
-        /// The chosen device was bound, but Core Audio did not report it
-        /// running after start. Audio may be coming from another device.
+        /// The chosen device is the default input, but Core Audio did not
+        /// report it running after start. Audio may be coming from elsewhere.
         case selectedUnconfirmed
-        /// The chosen device is not connected (or could not be bound);
-        /// recording from the system default instead.
+        /// The chosen device is not connected (or the default input moved
+        /// away from it); recording from the system default instead.
         case selectedUnavailable
     }
 
@@ -135,9 +135,24 @@ public struct MicInputStatus: Sendable, Equatable {
     }
 }
 
-// MARK: - Core Audio helpers for device binding
+// MARK: - Core Audio helpers for device selection
 
 extension CoreAudioHelpers {
+    /// Sets the macOS default input device. HAL applies asynchronously.
+    @discardableResult
+    static func setDefaultInputDevice(_ deviceID: AudioObjectID) -> OSStatus {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value = deviceID
+        return AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil,
+            UInt32(MemoryLayout<AudioObjectID>.size), &value
+        )
+    }
+
     /// `true` while any process (including us) has IO running on the device.
     static func isRunningSomewhere(_ deviceID: AudioObjectID) -> Bool? {
         let value: UInt32? = getPropertyData(

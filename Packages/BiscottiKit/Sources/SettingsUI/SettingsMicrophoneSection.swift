@@ -6,7 +6,7 @@ import SwiftUI
 extension SettingsView {
     /// Caption under the input picker.
     static let microphoneChoiceCaption =
-        "Biscotti records from this mic. Changes apply from the next recording."
+        "While recording, Biscotti makes this your Mac's input (so your meeting app uses it too) and switches back when you stop. Changes apply from the next recording."
 
     /// Caption under the level test.
     static let microphoneTestCaption =

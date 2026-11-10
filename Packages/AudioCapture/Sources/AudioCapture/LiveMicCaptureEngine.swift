@@ -27,8 +27,12 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
     /// `engineQueue`, read from any thread.
     private let _inputStatus = Mutex<MicInputStatus?>(nil)
 
-    /// Device the current build bound to. Owned by `engineQueue`.
+    /// Device the current build captures from. Owned by `engineQueue`.
     private var currentInputID: AudioObjectID = 0
+
+    /// The macOS default input before this recording switched it to the
+    /// chosen mic; restored on stop. Owned by `engineQueue`.
+    private var restoreDefaultInputID: AudioObjectID?
 
     /// Owned by engineQueue; each start gets a separate file and callback lifetime.
     private var session: MicCaptureSession?
@@ -108,6 +112,7 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 engineQueue.async { [self] in
                     isTearingDown = false
+                    applyPreferredDefaultInput()
                     do {
                         levelMeter.reset()
                         session = try MicCaptureSession(
@@ -119,6 +124,7 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
                     } catch {
                         teardownEngine()
                         restoreOutputRate()
+                        restoreDefaultInput()
                         closeSession()
                         capturingFlag.store(false, ordering: .releasing)
                         cont.resume(throwing: error)
@@ -144,6 +150,7 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
                 removeConfigChangeObserver()
                 teardownEngine()
                 restoreOutputRate()
+                restoreDefaultInput()
                 closeSession()
                 cont.resume()
             }
@@ -174,6 +181,7 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
                     removeConfigChangeObserver()
                     teardownEngine()
                     restoreOutputRate()
+                    restoreDefaultInput()
                     closeSession()
                     capturingFlag.store(false, ordering: .releasing)
                     cont.resume(throwing: CaptureError.micEngineFailed(
@@ -190,6 +198,7 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
         removeConfigChangeObserver()
         teardownEngine()
         restoreOutputRate()
+        restoreDefaultInput()
         closeSession()
     }
 
@@ -206,14 +215,11 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
         engine = newEngine // store early so teardownEngine() works on failure
         let input = newEngine.inputNode
 
-        // Bind the chosen device before enabling voice processing: VPIO builds
-        // its duplex aggregate from the input node's current device.
-        var bound = target
-        if target.isPinned, !bindInputDevice(target.deviceID, to: input) {
-            bound = fallbackToDefault(requestedName: target.status.requestedName)
-        }
-        currentInputID = bound.deviceID
-        _inputStatus.withLock { $0 = bound.status }
+        // VPIO always captures from the macOS default input (hardware testing
+        // showed it ignores kAudioOutputUnitProperty_CurrentDevice), so the
+        // chosen mic is applied by switching the default at start.
+        currentInputID = target.deviceID
+        _inputStatus.withLock { $0 = target.status }
 
         try input.setVoiceProcessingEnabled(true)
         input.voiceProcessingOtherAudioDuckingConfiguration = .init(
@@ -221,7 +227,7 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
         )
 
         try installCaptureGraphAndStart(newEngine)
-        verifyBinding(bound)
+        verifyBinding(target)
     }
 
     /// Re-query the hardware format for both initial setup and startup recovery.
@@ -280,6 +286,7 @@ final class LiveMicCaptureEngine: CaptureEngine, @unchecked Sendable { // swiftl
             removeConfigChangeObserver()
             teardownEngine()
             restoreOutputRate()
+            restoreDefaultInput()
             closeSession()
             capturingFlag.store(false, ordering: .releasing)
             // Keep the error handler off the serial engine lifecycle queue.
@@ -466,70 +473,76 @@ private extension LiveMicCaptureEngine {
         CoreAudioHelpers.deviceName(for: deviceID) ?? "Unknown microphone"
     }
 
-    /// Resolves the Settings choice against connected devices. Re-run on every
-    /// build, so unplugging the chosen mic mid-recording falls back to the
-    /// default on the configuration-change rebuild.
+    /// Describes the device this build will capture from: always the macOS
+    /// default input, compared against the Settings choice for display.
     func resolveInputDevice() -> InputTarget {
-        let selection = InputDeviceResolver.resolve(
-            preferredUID: preferredInput?.uid,
-            candidates: AudioInputDevices.candidates()
-        )
-        switch selection {
-        case .systemDefault:
-            let id = CoreAudioHelpers.defaultInputDeviceID() ?? 0
+        let id = CoreAudioHelpers.defaultInputDeviceID() ?? 0
+        let name = Self.displayName(of: id)
+        guard let preferredInput else {
             return InputTarget(
                 deviceID: id,
                 isPinned: false,
-                status: MicInputStatus(
-                    deviceName: Self.displayName(of: id), requestedName: nil, binding: .systemDefault
-                )
+                status: MicInputStatus(deviceName: name, requestedName: nil, binding: .systemDefault)
             )
-        case let .preferred(id):
-            let name = Self.displayName(of: id)
-            logger.notice("Mic input: selected device id=\(id, privacy: .public)")
-            return InputTarget(
-                deviceID: id,
-                isPinned: true,
-                status: MicInputStatus(deviceName: name, requestedName: name, binding: .selected)
-            )
-        case .preferredUnavailable:
-            logger.error("Mic input: selected device is not connected; falling back to the system default input")
-            return fallbackToDefault(requestedName: preferredInput?.name)
         }
-    }
-
-    /// Target for the system default, flagged as a fallback from the choice.
-    func fallbackToDefault(requestedName: String?) -> InputTarget {
-        let id = CoreAudioHelpers.defaultInputDeviceID() ?? 0
+        let isChosen = CoreAudioHelpers.deviceUID(for: id) == preferredInput.uid
+        if !isChosen {
+            logger.error("Mic input: recording from default input id=\(id, privacy: .public), not the selected device")
+        }
         return InputTarget(
             deviceID: id,
-            isPinned: false,
+            isPinned: isChosen,
             status: MicInputStatus(
-                deviceName: Self.displayName(of: id),
-                requestedName: requestedName ?? preferredInput?.name,
-                binding: .selectedUnavailable
+                deviceName: name,
+                requestedName: preferredInput.name,
+                binding: isChosen ? .selected : .selectedUnavailable
             )
         )
     }
 
-    /// Points the input node's IO unit at `deviceID`. Must run before
-    /// voice processing is enabled. Returns `false` if Core Audio refuses.
-    func bindInputDevice(_ deviceID: AudioObjectID, to input: AVAudioInputNode) -> Bool {
-        guard let unit = input.audioUnit else {
-            logger.error("Mic input bind: input node has no audio unit")
-            return false
+    /// At recording start, makes the chosen mic the macOS default input so
+    /// VPIO captures from it, remembering the previous default for `stop()`.
+    /// Only runs at start: a mid-recording default change by the user (or by
+    /// macOS when the mic is unplugged) is followed, not fought.
+    func applyPreferredDefaultInput() {
+        guard let preferredInput else { return }
+        guard case let .preferred(id) = InputDeviceResolver.resolve(
+            preferredUID: preferredInput.uid, candidates: AudioInputDevices.candidates()
+        ) else {
+            logger.error("Mic input: selected device is not connected; recording from the system default input")
+            return
         }
-        var device = deviceID
-        let status = AudioUnitSetProperty(
-            unit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &device,
-            UInt32(MemoryLayout<AudioObjectID>.size)
-        )
-        logger.notice("Mic input bind: device id=\(deviceID, privacy: .public) status=\(status, privacy: .public)")
-        return status == noErr
+        let current = CoreAudioHelpers.defaultInputDeviceID() ?? 0
+        guard current != id else {
+            logger.notice("Mic input: selected device id=\(id, privacy: .public) is already the default input")
+            return
+        }
+        let status = CoreAudioHelpers.setDefaultInputDevice(id)
+        logger.notice("Mic input: switching default input from id=\(current, privacy: .public) to selected id=\(id, privacy: .public) status=\(status, privacy: .public)")
+        guard status == noErr else { return }
+        restoreDefaultInputID = current
+        for _ in 0 ..< 40 {
+            if CoreAudioHelpers.defaultInputDeviceID() == id { break }
+            usleep(25000)
+        }
+    }
+
+    /// Puts back the default input saved by `applyPreferredDefaultInput()`,
+    /// unless the user changed it during the recording or it has gone.
+    func restoreDefaultInput() {
+        guard let previous = restoreDefaultInputID else { return }
+        restoreDefaultInputID = nil
+        let current = CoreAudioHelpers.defaultInputDeviceID() ?? 0
+        guard let preferredInput, CoreAudioHelpers.deviceUID(for: current) == preferredInput.uid else {
+            logger.notice("Mic input: default input changed during recording; not restoring")
+            return
+        }
+        guard AudioInputDevices.candidates().contains(where: { $0.id == previous }) else {
+            logger.notice("Mic input: previous default input id=\(previous, privacy: .public) is gone; not restoring")
+            return
+        }
+        let status = CoreAudioHelpers.setDefaultInputDevice(previous)
+        logger.notice("Mic input: restored default input id=\(previous, privacy: .public) status=\(status, privacy: .public)")
     }
 
     /// After start, confirms the chosen device is actually running. This log
