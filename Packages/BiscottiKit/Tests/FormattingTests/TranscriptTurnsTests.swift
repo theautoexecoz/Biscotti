@@ -1,7 +1,7 @@
 import DataStore
+import Formatting
 import Foundation
 import Testing
-import Formatting
 
 @Suite("TranscriptTurns")
 struct TranscriptTurnsTests {
