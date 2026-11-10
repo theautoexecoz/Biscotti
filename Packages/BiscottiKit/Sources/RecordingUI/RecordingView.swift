@@ -310,10 +310,6 @@ private extension RecordingView {
 
     @ViewBuilder
     var micBanners: some View {
-        if let micWarning = viewModel.micInputWarningText {
-            Banner(micWarning, style: .warning)
-                .frame(maxWidth: 400)
-        }
         if viewModel.showMicSilenceWarning {
             Banner(RecordingViewModel.micSilenceWarningText, style: .error)
                 .frame(maxWidth: 400)

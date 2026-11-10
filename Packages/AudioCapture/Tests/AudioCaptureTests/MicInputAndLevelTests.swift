@@ -1,39 +1,6 @@
-import CoreAudio
 import Foundation
 import Testing
 @testable import AudioCapture
-
-@Suite("InputDeviceResolver")
-struct InputDeviceResolverTests {
-    private let candidates = [
-        InputDeviceCandidate(uid: "BuiltInMicrophoneDevice", id: 81),
-        InputDeviceCandidate(uid: "AppleUSBAudioEngine:Shure:MV7", id: 112)
-    ]
-
-    @Test("no preference follows the system default")
-    func noPreference() {
-        #expect(InputDeviceResolver.resolve(preferredUID: nil, candidates: candidates) == .systemDefault)
-    }
-
-    @Test("empty preference follows the system default")
-    func emptyPreference() {
-        #expect(InputDeviceResolver.resolve(preferredUID: "", candidates: candidates) == .systemDefault)
-    }
-
-    @Test("connected preference resolves to its current object ID")
-    func connectedPreference() {
-        let result = InputDeviceResolver.resolve(
-            preferredUID: "AppleUSBAudioEngine:Shure:MV7", candidates: candidates
-        )
-        #expect(result == .preferred(112))
-    }
-
-    @Test("disconnected preference reports unavailable for visible fallback")
-    func disconnectedPreference() {
-        let result = InputDeviceResolver.resolve(preferredUID: "AirPodsPro", candidates: candidates)
-        #expect(result == .preferredUnavailable)
-    }
-}
 
 @Suite("AudioLevel")
 struct AudioLevelTests {
@@ -167,20 +134,6 @@ struct MicSilenceDetectorTests {
     }
 }
 
-@Suite("MicInputStatus")
-struct MicInputStatusTests {
-    @Test("only fallback and unconfirmed bindings need attention")
-    func needsAttention() {
-        let make = { (binding: MicInputStatus.Binding) in
-            MicInputStatus(deviceName: "Mic", requestedName: "Mic", binding: binding)
-        }
-        #expect(make(.systemDefault).needsAttention == false)
-        #expect(make(.selected).needsAttention == false)
-        #expect(make(.selectedUnconfirmed).needsAttention == true)
-        #expect(make(.selectedUnavailable).needsAttention == true)
-    }
-}
-
 @Suite("AudioRecorder mic level")
 struct AudioRecorderMicLevelTests {
     @Test("state stream carries the mic engine's level and input status while recording")
@@ -188,7 +141,7 @@ struct AudioRecorderMicLevelTests {
         let ctx = try TestRecorderFactory.make()
         defer { TestRecorderFactory.cleanup(ctx) }
         let level = AudioLevelSample(rms: 0.1, peak: 0.4, secondsSinceLastBuffer: 0.02)
-        let input = MicInputStatus(deviceName: "Shure MV7", requestedName: "Shure MV7", binding: .selected)
+        let input = MicInputStatus(deviceName: "Shure MV7")
         ctx.micEngine.setLevel(level)
         ctx.micEngine.setInputStatus(input)
 

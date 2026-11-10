@@ -1,26 +1,38 @@
+import AppKit
 import DesignSystem
 import SwiftUI
 
 // MARK: - Microphone section
 
 extension SettingsView {
-    /// Caption under the input picker.
-    static let microphoneChoiceCaption =
-        "While recording, Biscotti makes this your Mac's input (so your meeting app uses it too) and switches back when you stop. Changes apply from the next recording."
+    /// Caption under the current input.
+    static let microphoneInputCaption =
+        "Biscotti records from your Mac's input. Change it in System Settings → Sound."
 
     /// Caption under the level test.
     static let microphoneTestCaption =
         "Speak normally: the bar should move well into the green. Levels here are before voice processing, so they can read lower than while recording."
 
+    /// System Settings → Sound → Input.
+    static let soundSettingsURL = URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension")
+
     var microphoneSection: some View {
         Section(Self.sectionTitles[1]) {
             VStack(alignment: .leading, spacing: Tokens.spacingXS) {
-                Picker("Input device", selection: microphoneSelectionBinding) {
-                    ForEach(micSettings.choices) { choice in
-                        Text(choice.label).tag(choice.id)
+                HStack {
+                    Text("Input")
+                    Spacer()
+                    Text(micSettings.currentInputText)
+                        .foregroundStyle(Tokens.secondaryText)
+                    if let url = Self.soundSettingsURL {
+                        Button("Sound Settings\u{2026}") {
+                            NSWorkspace.shared.open(url)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
                 }
-                Text(Self.microphoneChoiceCaption)
+                Text(Self.microphoneInputCaption)
                     .font(Tokens.metadataFont)
                     .foregroundStyle(Tokens.secondaryText)
             }
@@ -35,7 +47,6 @@ extension SettingsView {
                         if micSettings.isTesting {
                             micSettings.stopTest()
                         } else {
-                            micSettings.refresh()
                             micSettings.startTest()
                         }
                     }
@@ -60,12 +71,5 @@ extension SettingsView {
         }
         .onAppear { micSettings.refresh() }
         .onDisappear { micSettings.stopTest() }
-    }
-
-    private var microphoneSelectionBinding: Binding<String> {
-        Binding(
-            get: { micSettings.selectedID },
-            set: { micSettings.select(id: $0) }
-        )
     }
 }

@@ -497,7 +497,6 @@ let package = Package(
                 "MCPServer",
                 "ModelManagementUI",
                 "Permissions",
-                "Recording",
                 "SummaryPromptUI",
                 "Vocabulary",
                 .product(name: "AudioCapture", package: "AudioCapture")

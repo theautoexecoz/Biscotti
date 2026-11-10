@@ -460,23 +460,4 @@ public extension RecordingViewModel {
     /// Banner text when the mic is silent.
     static let micSilenceWarningText =
         "No microphone audio for \(Int(MicSilenceDetector.defaultWindow)) seconds. Check your mic is connected and not muted."
-
-    /// Banner text when the chosen mic is not the one recording, or `nil`.
-    var micInputWarningText: String? {
-        Self.micInputWarningText(for: core.recording.micInput)
-    }
-
-    /// Pure mapping for `micInputWarningText`, exposed for tests.
-    static func micInputWarningText(for status: MicInputStatus?) -> String? {
-        guard let status, status.needsAttention else { return nil }
-        let requested = status.requestedName ?? "The selected microphone"
-        switch status.binding {
-        case .selectedUnavailable:
-            return "\(requested) isn't available. Recording from \(status.deviceName) instead."
-        case .selectedUnconfirmed:
-            return "Couldn't confirm \(requested) is recording. Watch the level meter."
-        case .systemDefault, .selected:
-            return nil
-        }
-    }
 }

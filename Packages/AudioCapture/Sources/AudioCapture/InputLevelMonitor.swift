@@ -23,13 +23,13 @@ public final class InputLevelMonitor: @unchecked Sendable {
 
     public init() {}
 
-    /// Starts metering `device`, or the system default input when `nil`.
+    /// Starts metering the macOS default input (the device recordings use).
     /// Restarts if already running. Throws if the engine cannot start.
-    public func start(device: AudioInputDevice?) async throws {
+    public func start() async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             queue.async { [self] in
                 do {
-                    try startOnQueue(device: device)
+                    try startOnQueue()
                     cont.resume()
                 } catch {
                     stopOnQueue()
@@ -58,38 +58,13 @@ public final class InputLevelMonitor: @unchecked Sendable {
 
     // MARK: - Queue-confined
 
-    private func startOnQueue(device: AudioInputDevice?) throws {
+    private func startOnQueue() throws {
         stopOnQueue()
         meter.reset()
 
         let newEngine = AVAudioEngine()
         engine = newEngine
         let input = newEngine.inputNode
-
-        if let device {
-            let candidates = AudioInputDevices.candidates()
-            guard case let .preferred(id) = InputDeviceResolver.resolve(
-                preferredUID: device.uid, candidates: candidates
-            ) else {
-                throw CaptureError.micEngineFailed("\(device.name) is not connected.")
-            }
-            guard let unit = input.audioUnit else {
-                throw CaptureError.micEngineFailed("The microphone input is unavailable.")
-            }
-            var deviceID = id
-            let status = AudioUnitSetProperty(
-                unit,
-                kAudioOutputUnitProperty_CurrentDevice,
-                kAudioUnitScope_Global,
-                0,
-                &deviceID,
-                UInt32(MemoryLayout<AudioObjectID>.size)
-            )
-            logger.notice("Level preview bind: device id=\(id, privacy: .public) status=\(status, privacy: .public)")
-            guard status == noErr else {
-                throw CaptureError.micEngineFailed("Could not open \(device.name) (OSStatus \(status)).")
-            }
-        }
 
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {

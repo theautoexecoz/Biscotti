@@ -715,7 +715,7 @@ struct RecordingMicLevelTests {
     func publishesLevelAndDevice() throws {
         let fix = try makeFixture()
         defer { fix.cleanup() }
-        let input = MicInputStatus(deviceName: "Shure MV7", requestedName: "Shure MV7", binding: .selected)
+        let input = MicInputStatus(deviceName: "Shure MV7")
 
         fix.controller.ingestMicState(Self.captureState(elapsed: 1, peak: 0.3, input: input))
 

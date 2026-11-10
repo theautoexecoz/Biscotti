@@ -653,19 +653,11 @@ public extension AudioRecorder {
     /// Creates a recorder wired to real Core Audio / AVAudioEngine backends.
     ///
     /// Use this for production; use the main `init` with fakes for tests.
-    ///
-    /// - Parameter preferredInput: The microphone chosen in Settings, or `nil`
-    ///   to follow the macOS default input. If the device is not connected
-    ///   the recorder falls back to the default and reports it via
-    ///   `CaptureState.micInput`.
-    static func live(
-        encoder: EncoderSettings = .voice,
-        preferredInput: AudioInputDevice? = nil
-    ) -> AudioRecorder {
+    static func live(encoder: EncoderSettings = .voice) -> AudioRecorder {
         let permissionChecker = LiveSystemPermissionChecker()
         return AudioRecorder(
             systemEngine: LiveSystemCaptureEngine(permissionChecker: permissionChecker, encoder: encoder),
-            micEngine: LiveMicCaptureEngine(encoder: encoder, preferredInput: preferredInput),
+            micEngine: LiveMicCaptureEngine(encoder: encoder),
             deviceChangeProvider: LiveDeviceChangeProvider(),
             permissionChecker: permissionChecker,
             micPermissionChecker: LiveMicPermissionChecker(),
