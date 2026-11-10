@@ -42,38 +42,10 @@ public enum TranscriptTextFormatting {
     public static func render(
         _ segments: [SegmentData], names: [Int: String] = [:]
     ) -> String {
-        var turns: [String] = []
-        var currentSpeakerID: Int?
-        var currentName = ""
-        var currentStartTime: TimeInterval = 0
-        var currentText = ""
-
-        func flushTurn() {
-            if !currentText.isEmpty {
-                let timeText = TimeFormatting.formatPlaybackTime(currentStartTime)
-                turns.append("[\(timeText)] \(currentName)\n\(currentText)")
-            }
-            currentSpeakerID = nil
-            currentName = ""
-            currentText = ""
+        let turns = TranscriptTurns.merge(segments).map { turn in
+            let timeText = TimeFormatting.formatPlaybackTime(turn.startTime)
+            return "[\(timeText)] \(displayName(for: turn, names: names))\n\(turn.text)"
         }
-
-        for segment in segments {
-            let trimmed = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-
-            let name = displayName(for: segment, names: names)
-            if let speakerID = segment.speakerID, speakerID == currentSpeakerID {
-                currentText += " " + trimmed
-            } else {
-                flushTurn()
-                currentSpeakerID = segment.speakerID
-                currentName = name
-                currentStartTime = segment.startTime
-                currentText = trimmed
-            }
-        }
-        flushTurn()
 
         return turns.joined(separator: "\n\n")
     }
