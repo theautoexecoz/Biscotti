@@ -40,3 +40,9 @@ public protocol RecorderControlling: Sendable {
 // public type aliases (e.g. `public typealias CapturePaths = AudioCapture.CapturePaths`).
 @_exported import struct AudioCapture.CapturePaths
 @_exported import struct AudioCapture.CaptureState
+
+// Mic level and input types surfaced to the UI (same re-export trade-off).
+@_exported import enum AudioCapture.AudioLevel
+@_exported import struct AudioCapture.AudioLevelSample
+@_exported import struct AudioCapture.MicInputStatus
+@_exported import struct AudioCapture.MicSilenceDetector

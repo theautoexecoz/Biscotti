@@ -498,7 +498,8 @@ let package = Package(
                 "ModelManagementUI",
                 "Permissions",
                 "SummaryPromptUI",
-                "Vocabulary"
+                "Vocabulary",
+                .product(name: "AudioCapture", package: "AudioCapture")
             ],
             swiftSettings: warningsAsErrors
         ),

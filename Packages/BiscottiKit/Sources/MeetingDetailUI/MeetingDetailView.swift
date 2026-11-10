@@ -2,6 +2,7 @@ import AppCore
 import AppKit
 import DataStore
 import DesignSystem
+import Formatting
 import ImportExport
 import Intelligence
 import MarkdownEditorUI
@@ -1064,7 +1065,8 @@ private extension MeetingDetailView {
             TranscriptListView(
                 transcriptID: transcriptID,
                 canSeek: viewModel.canPlay,
-                segments: transcript.segments,
+                // One row per speaker turn, matching the Copy output.
+                segments: TranscriptTurns.merge(transcript.segments),
                 speakerNames: viewModel.displayedSpeakerNames,
                 speakerColorKeys: viewModel.displayedSpeakerColorKeys,
                 onSeek: { viewModel.seekAndPlay(to: $0) },

@@ -24,6 +24,9 @@ final class MicCaptureSession: @unchecked Sendable { // swiftlint:disable:this t
 
     private let processingFormat: AVAudioFormat
     private let onFirstBuffer: (@Sendable (Double) -> Void)?
+    /// Receives every accepted tap buffer for live level display and the
+    /// silence detector. Shared across attempts by the owning engine.
+    private let levelMeter: AudioLevelMeter?
 
     // -- Tap ownership (tapLock) --
     private let tapLock = OSAllocatedUnfairLock()
@@ -92,9 +95,15 @@ final class MicCaptureSession: @unchecked Sendable { // swiftlint:disable:this t
     /// Opens a new file, starts the writer thread, and captures this
     /// attempt's callback immutably. A later recorder retry cannot redirect
     /// an old tap to its own file or callback.
-    init(url: URL, encoder: EncoderSettings, onFirstBuffer: (@Sendable (Double) -> Void)?) throws {
+    init(
+        url: URL,
+        encoder: EncoderSettings,
+        onFirstBuffer: (@Sendable (Double) -> Void)?,
+        levelMeter: AudioLevelMeter? = nil
+    ) throws {
         processingFormat = encoder.processingFormat
         self.onFirstBuffer = onFirstBuffer
+        self.levelMeter = levelMeter
 
         slotByteSize = Int(Self.slotMaxFrames) * MemoryLayout<Float>.size
         slotData = .allocate(
@@ -206,6 +215,9 @@ final class MicCaptureSession: @unchecked Sendable { // swiftlint:disable:this t
         else { return }
 
         let frameCount = buffer.frameLength
+        // Measure before the ring checks so the meter reflects what the
+        // hardware delivered even if the writer is momentarily behind.
+        levelMeter?.ingest(srcChannels[0], count: Int(frameCount))
         guard frameCount <= Self.slotMaxFrames else {
             droppedBufferCount.wrappingAdd(1, ordering: .relaxed)
             return
